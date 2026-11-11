@@ -1,0 +1,190 @@
+
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 텍스트 변형 실험실</title>
+<style>
+:root{font-family:system-ui,"Noto Sans KR",sans-serif;color:#202431;background:#f5f7fb}
+*{box-sizing:border-box}
+body{margin:0;padding:24px}
+.wrap{max-width:1050px;margin:auto}
+header{margin-bottom:22px}
+h1{font-size:1.8rem;margin:0 0 8px}
+p{line-height:1.6;color:#596273}
+.card{background:white;border:1px solid #e0e5ee;border-radius:14px;padding:18px;margin:14px 0}
+h2{font-size:1.1rem;margin:0 0 12px}
+label{font-weight:650;display:block;margin:12px 0 6px}
+textarea,input{width:100%;border:1px solid #cbd3df;border-radius:9px;padding:11px;font:inherit;background:white}
+textarea{min-height:130px;resize:vertical}
+.small{font-size:.88rem;color:#697386}
+button{border:0;border-radius:9px;padding:10px 15px;font:inherit;font-weight:650;cursor:pointer;background:#263a63;color:white;margin:6px 6px 0 0}
+button.secondary{background:#e9edf5;color:#263247}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.tokenlist{display:flex;flex-wrap:wrap;gap:7px}
+.token{border:1px solid #d8deea;border-radius:8px;padding:7px 9px;background:#f9fafc;font-size:.9rem}
+.token.target{border-color:#d48b36;background:#fff5e8}
+.token b{color:#a45c12}
+.result{white-space:pre-wrap;overflow-wrap:anywhere;background:#f8f9fc;border:1px solid #e3e7ef;padding:12px;border-radius:9px;min-height:100px}
+.notice{background:#fff8e9;border:1px solid #f0d7a8;padding:12px;border-radius:9px;color:#654b20}
+@media(max-width:700px){body{padding:12px}.row{grid-template-columns:1fr}h1{font-size:1.45rem}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<h1>🔬 AI 텍스트 변형 실험실</h1>
+<p>텍스트의 변형 조건을 통제하고, 원본과 변형본의 차이 및 판별 결과를 기록하는 연구용 도구입니다.</p>
+</header>
+
+<div class="card">
+<h2>① 원본 텍스트 입력</h2>
+<textarea id="source" placeholder="분석할 텍스트를 붙여 넣으세요."></textarea>
+<p class="small">현재 버전은 실제 언어 모델 토큰이 아닌, 공백으로 구분한 단어 단위를 임시 토큰으로 사용합니다.</p>
+<button id="analyze">토큰 분석하기</button>
+</div>
+
+<div class="card">
+<h2>② 토큰 확인</h2>
+<div id="stats" class="small">텍스트를 입력한 뒤 토큰 분석을 실행하세요.</div>
+<div id="tokens" class="tokenlist" style="margin-top:12px"></div>
+</div>
+
+<div class="card">
+<h2>③ 통제된 변형 입력</h2>
+<div class="notice">5번째, 10번째, 15번째처럼 5개 단위의 위치를 실험 대상으로 표시합니다. 변형 후보는 연구자가 직접 입력합니다.</div>
+<div id="editors"></div>
+<button id="apply">변형본 만들기</button>
+<button id="reset" class="secondary">입력 초기화</button>
+</div>
+
+<div class="card">
+<h2>④ 결과 비교</h2>
+<div class="row">
+<div><label>원본</label><div id="originalResult" class="result"></div></div>
+<div><label>변형본</label><div id="modifiedResult" class="result"></div></div>
+</div>
+<div id="changeCount" class="small" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
+<h2>⑤ 띄어쓰기 변형 실험</h2>
+<p class="small">띄어쓰기 조건은 단어 변형과 별도로 입력하고 비교하세요.</p>
+<textarea id="spacing" placeholder="원본을 붙여 넣고 띄어쓰기를 수정하세요."></textarea>
+<div style="margin-top:10px"><label>띄어쓰기 변형본</label><div id="spacingResult" class="result"></div></div>
+</div>
+
+<div class="card">
+<h2>⑥ 판별 결과 기록</h2>
+<p class="small">외부 판별 도구의 결과를 직접 입력합니다. 이 프로그램은 외부 서비스와 자동 연결되지 않습니다.</p>
+<div class="row">
+<div><label for="scoreOriginal">원본 검사 결과 (예: AI 의심률 %)</label><input id="scoreOriginal" placeholder="예: 72"></div>
+<div><label for="scoreModified">변형본 검사 결과 (예: AI 의심률 %)</label><input id="scoreModified" placeholder="예: 48"></div>
+</div>
+<label for="memo">실험 메모</label><textarea id="memo" style="min-height:80px" placeholder="검사 날짜, 도구명, 실험 조건 등을 기록하세요."></textarea>
+<button id="download">실험 기록 CSV 다운로드</button>
+</div>
+<footer class="small">주의: 이 도구는 실험 조건과 텍스트 차이를 기록하기 위한 보조 도구입니다. 결과는 사용한 판별 도구와 데이터, 검사 조건에 따라 달라질 수 있습니다.</footer>
+</div>
+
+<script>
+let words = [];
+let sourceText = "";
+let replacements = {};
+const $ = id => document.getElementById(id);
+
+function analyze(){
+  sourceText = $("source").value;
+  words = sourceText.match(/\S+/g) || [];
+  replacements = {};
+  $("stats").textContent = `공백 기준 토큰 수: ${words.length}개 · 변형 대상 위치: ${Math.floor(words.length/5)}개`;
+  $("tokens").innerHTML = "";
+  words.forEach((word,i)=>{
+    const span=document.createElement("span");
+    span.className="token"+((i+1)%5===0?" target":"");
+    span.textContent=`${i+1}. ${word}`;
+    if((i+1)%5===0){
+      const b=document.createElement("b");
+      b.textContent=" · 대상";
+      span.appendChild(b);
+    }
+    $("tokens").appendChild(span);
+  });
+  $("editors").innerHTML="";
+  words.forEach((word,i)=>{
+    if((i+1)%5!==0)return;
+    const label=document.createElement("label");
+    label.textContent=`${i+1}번째 토큰: ${word}`;
+    const input=document.createElement("input");
+    input.placeholder="실험에 사용할 대체 표현을 직접 입력";
+    input.dataset.index=i;
+    $("editors").append(label,input);
+  });
+  $("originalResult").textContent=sourceText;
+  $("modifiedResult").textContent=sourceText;
+  $("spacing").value=sourceText;
+  $("spacingResult").textContent=sourceText;
+  $("changeCount").textContent="";
+}
+
+function applyChanges(){
+  const inputs=[...$("editors").querySelectorAll("input")];
+  replacements={};
+  inputs.forEach(input=>{
+    if(input.value.trim())replacements[Number(input.dataset.index)]=input.value.trim();
+  });
+  let modified=sourceText;
+  const matches=[...sourceText.matchAll(/\S+/g)];
+  Object.keys(replacements).map(Number).sort((a,b)=>b-a).forEach(i=>{
+    const m=matches[i];
+    if(m) modified=modified.slice(0,m.index)+replacements[i]+modified.slice(m.index+m[0].length);
+  });
+  $("modifiedResult").textContent=modified;
+  $("changeCount").textContent=`변경된 토큰 수: ${Object.keys(replacements).length}개`;
+  $("spacingResult").textContent=$("spacing").value;
+}
+
+function downloadCSV(){
+  const modified=$("modifiedResult").textContent;
+  const rows=[
+    ["항목","내용"],
+    ["원본 텍스트",sourceText],
+    ["단어 변형본",modified],
+    ["띄어쓰기 변형본",$("spacing").value],
+    ["원본 판별 결과",$("scoreOriginal").value],
+    ["변형본 판별 결과",$("scoreModified").value],
+    ["실험 메모",$("memo").value],
+    ["변경 내역","토큰 번호 | 변경 전 | 변경 후"],
+    ...Object.entries(replacements).map(([i,v])=>[`${Number(i)+1}번째 토큰`,words[Number(i)],v])
+  ];
+  const csv=rows.map(row=>row.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(",")).join("\r\n");
+  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download="text_experiment.csv";a.click();
+  URL.revokeObjectURL(url);
+}
+
+$("analyze").addEventListener("click",analyze);
+$("apply").addEventListener("click",applyChanges);
+$("spacing").addEventListener("input",()=>{$("spacingResult").textContent=$("spacing").value;});
+$("reset").addEventListener("click",()=>{
+  $("source").value="";
+  $("scoreOriginal").value="";
+  $("scoreModified").value="";
+  $("memo").value="";
+  $("stats").textContent="텍스트를 입력한 뒤 토큰 분석을 실행하세요.";
+  $("tokens").innerHTML="";
+  $("editors").innerHTML="";
+  $("originalResult").textContent="";
+  $("modifiedResult").textContent="";
+  $("spacing").value="";
+  $("spacingResult").textContent="";
+  $("changeCount").textContent="";
+  words=[];sourceText="";replacements={};
+});
+$("download").addEventListener("click",downloadCSV);
+</script>
+</body>
+</html>
